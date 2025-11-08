@@ -132,11 +132,14 @@ async def api_images_download(
     files = list(iter_files(target_dir))
     zip_path = job_dir / f"{target_dir.name}.zip"
     make_zip(target_dir, zip_path)
+    files_urls = [build_file_url(file_path) for file_path in files]
     return {
         "message": f"下载完成，共 {len(files)} 张图片",
         "job_id": job_id,
         "archive": build_file_url(zip_path),
-        "files": [build_file_url(file_path) for file_path in files],
+        "files": files_urls,
+        "total_files": len(files_urls),
+        "previews": files_urls,
     }
 
 

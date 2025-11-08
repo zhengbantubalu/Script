@@ -722,12 +722,29 @@ body {
   background: rgba(15, 23, 42, 0.04);
 }
 
+.preview-grid__link {
+  display: block;
+}
+
 .preview-grid__caption {
   margin: 0;
   padding: 10px 12px;
   font-size: 0.85rem;
   color: var(--text-sub);
-  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.preview-grid__download {
+  color: var(--primary);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-decoration: none;
+}
+
+.preview-grid__download:hover {
+  text-decoration: underline;
 }
 
 .result__files {

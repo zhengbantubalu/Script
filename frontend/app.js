@@ -625,13 +625,6 @@ const MODULES = [
         label: "网页地址",
         placeholder: "https://example.com",
         required: true
-      },
-      {
-        id: "save_path",
-        type: "text",
-        label: "存储路径",
-        placeholder: "如 downloads/images",
-        description: "后台会在该相对路径下保存抓取的图片。"
       }
     ],
     guide: {
@@ -1325,23 +1318,30 @@ const renderResult = (form, module, payload) => {
 
   if (previewsEl) {
     if (Array.isArray(payload.previews) && payload.previews.length > 0) {
+      const isFullPreviewModule = module.id === "images-download";
       const previewItems = payload.previews
         .map((previewUrl, index) => {
           if (typeof previewUrl !== "string") {
             return "";
           }
           const fullUrl = resolveFileUrl(previewUrl);
+          const filename = previewUrl.split("/").pop() || `file-${index + 1}`;
           return `
             <figure class="preview-grid__item">
-              <img class="preview-grid__image" src="${fullUrl}" alt="${module.name} 预览图 ${
-            index + 1
-          }" loading="lazy" />
-              <figcaption class="preview-grid__caption">预览 ${index + 1}</figcaption>
+              <a class="preview-grid__link" href="${fullUrl}" target="_blank" rel="noopener noreferrer">
+                <img class="preview-grid__image" src="${fullUrl}" alt="${module.name} 预览图 ${index + 1}" loading="lazy" />
+              </a>
+              <figcaption class="preview-grid__caption">
+                <span>预览 ${index + 1}</span>
+                <a class="preview-grid__download" href="${fullUrl}" download="${filename}">下载</a>
+              </figcaption>
             </figure>
           `;
         })
         .join("");
-      const header = `<p class="result__meta">结果预览（展示前 ${payload.previews.length} 项）</p>`;
+      const header = `<p class="result__meta">结果预览（${isFullPreviewModule ? "共" : "展示前"} ${
+        payload.previews.length
+      } 项）</p>`;
       previewsEl.innerHTML = `${header}<div class="preview-grid">${previewItems}</div>`;
       previewsEl.hidden = false;
     } else {
