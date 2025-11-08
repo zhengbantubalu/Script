@@ -43,6 +43,18 @@ const getBackendBaseUrl = () => {
  */
 const BACKEND_BASE_URL = getBackendBaseUrl();
 
+/**
+ * 本地扫描助手默认端口。
+ * @type {number}
+ */
+const LOCAL_SCANNER_PORT = 47832;
+
+/**
+ * 获取本地扫描助手基础地址。
+ * @returns {string}
+ */
+const getLocalScannerBaseUrl = () => `http://127.0.0.1:${LOCAL_SCANNER_PORT}`;
+
 const IMAGE_PREVIEW_OVERLAY_ID = "image-preview-overlay";
 
 let imagePreviewOverlayRef = null;
@@ -777,7 +789,7 @@ const MODULES = [
     name: "局域网设备扫描",
     summary: "快速查看当前网段在线设备列表。",
     description:
-      "使用 `scan.py` 通过 ARP 探测局域网设备，自动识别本机所有活跃网段并扫描。",
+      "优先通过“本地扫描助手”在用户设备侧进行 ARP 扫描，自动识别活跃网段；未检测到助手时回退服务器侧扫描。",
     endpoint: "/api/tasks/network-scan",
     tags: [
       { id: "network", label: "网络" },
@@ -788,7 +800,8 @@ const MODULES = [
       title: "安全提示",
       tips: [
         "仅在授权的内网环境中使用，避免对他人网络造成干扰。",
-        "部分设备可能关闭 ARP 响应，如需更全列表可多次扫描。"
+        "部分设备可能关闭 ARP 响应，如需更全列表可多次扫描。",
+        "要扫描“用户所在局域网”，请先在本机运行：python scripts/local_scanner_server.py（默认端口 47832）。"
       ]
     }
   },
@@ -1549,28 +1562,64 @@ const handleSubmit = async (event) => {
   }
 
   resetResult(form);
-  updateStatus(form, "info", "任务提交中...", "请稍候，正在上传数据");
+  updateStatus(form, "info", "任务提交中...", "请稍候，正在处理");
 
   try {
-    const formData = serializeForm(form);
-    const endpoint = resolveEndpointUrl(module.endpoint);
-    const response = await fetch(endpoint, {
-      method: "POST",
-      body: formData
-    });
+    // 特例：局域网设备扫描优先尝试本地扫描助手
+    if (module.id === "network-scan") {
+      /**
+       * 使用 fetch+超时尝试访问本地扫描助手。
+       * @param {string} url 目标 URL
+       * @param {number} timeoutMs 超时时间（毫秒）
+       * @returns {Promise<Response>}
+       */
+      const fetchWithTimeout = (url, timeoutMs = 4000) => {
+        const controller = new AbortController();
+        const id = setTimeout(() => controller.abort(), timeoutMs);
+        return fetch(url, { method: "GET", signal: controller.signal })
+          .finally(() => clearTimeout(id));
+      };
 
-    if (!response.ok) {
-      throw new Error(`请求失败，状态码 ${response.status}`);
+      try {
+        updateStatus(form, "info", "尝试在本机扫描...", "正在连接本地扫描助手");
+        const localUrl = `${getLocalScannerBaseUrl()}/scan`;
+        const res = await fetchWithTimeout(localUrl, 5000);
+        if (res.ok) {
+          const payload = await res.json();
+          updateStatus(form, "success", "本地扫描完成", `共发现 ${Array.isArray(payload.devices) ? payload.devices.length : 0} 台设备`);
+          renderResult(form, module, payload);
+          return;
+        }
+        // 非 2xx 状态时，回退服务器扫描
+        updateStatus(form, "info", "未检测到本地扫描助手，改为服务器扫描...", "如需扫描本机局域网，请先运行本地助手");
+      } catch (_err) {
+        // 网络/超时等错误，回退服务器扫描
+        updateStatus(form, "info", "未检测到本地扫描助手，改为服务器扫描...", "如需扫描本机局域网，请先运行本地助手");
+      }
     }
 
-    const result = await response.json().catch(() => ({ message: "提交成功" }));
-    const successMessage =
-      typeof result.message === "string" && result.message.trim() !== ""
-        ? result.message.trim()
-        : `${module.name}任务已提交`;
-    const metaText = result.job_id ? `任务编号：${result.job_id}` : "任务已排队";
-    updateStatus(form, "success", successMessage, metaText);
-    renderResult(form, module, result);
+    // 默认：调用后端接口
+    {
+      const formData = serializeForm(form);
+      const endpoint = resolveEndpointUrl(module.endpoint);
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: formData
+      });
+
+      if (!response.ok) {
+        throw new Error(`请求失败，状态码 ${response.status}`);
+      }
+
+      const result = await response.json().catch(() => ({ message: "提交成功" }));
+      const successMessage =
+        typeof result.message === "string" && result.message.trim() !== ""
+          ? result.message.trim()
+          : `${module.name}任务已提交`;
+      const metaText = result.job_id ? `任务编号：${result.job_id}` : "任务已排队";
+      updateStatus(form, "success", successMessage, metaText);
+      renderResult(form, module, result);
+    }
   } catch (error) {
     const errorMessage =
       error instanceof TypeError

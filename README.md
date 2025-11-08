@@ -81,6 +81,28 @@ uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 - 上传文件、解压后的原始数据、处理结果以及生成的压缩包均保存在该目录。
 - 清理策略：默认不自动清除，请定期手动删除历史作业目录或编写计划任务。
 
+## 本地局域网扫描助手（推荐）
+
+出于浏览器安全限制，网页无法直接对用户设备所在局域网执行 ARP/端口探测。因此平台新增了“本地扫描助手”，让扫描在用户本机进行，结果直接回传给前端展示；若未运行助手，则回退为在服务器侧扫描（即扫描服务器所在局域网）。
+
+### 启动本地扫描助手
+
+```bash
+cd /Volumes/KIOXIA/Scripts/web
+python -m venv .venv
+source .venv/bin/activate   # Windows 使用 .\.venv\Scripts\activate
+pip install --upgrade pip
+pip install -r backend/requirements.txt
+
+# macOS/Linux 如需原生 ARP 扫描，建议以管理员权限运行
+python scripts/local_scanner_server.py
+# 服务器默认监听 http://127.0.0.1:47832
+```
+
+- 前端在提交“局域网设备扫描”时，会优先尝试请求 `http://127.0.0.1:47832/scan`；
+- 如果无法连接本地助手，则自动回退调用后端 `/api/tasks/network-scan`（扫描服务器所在网段）；
+- `scapy` 在不同系统上可能需要管理员/root 权限或额外授权（macOS 会弹出本地网络访问授权）。
+
 ## 前端站点
 
 前端位于 `frontend/` 目录，可通过任意静态服务器或直接浏览器打开：
