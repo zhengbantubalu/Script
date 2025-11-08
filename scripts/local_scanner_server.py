@@ -67,7 +67,7 @@ def health():
 
 
 @app.get("/scan")
-def scan():
+def scan(fast: bool = False):
     """
     触发一次本机所在局域网的扫描，输出结构与后端 /api/tasks/network-scan 尽量保持一致：
     {
@@ -80,7 +80,7 @@ def scan():
         ]
     }
     """
-    result = scan_lan_devices()
+    result = scan_lan_devices() if not fast else _scan_fast()
     devices = result.get("devices", [])
     networks = result.get("networks", [])
     groups = result.get("groups", {})
@@ -119,6 +119,40 @@ def scan():
         "devices": devices,
         "groups": grouped,
     }
+
+
+def _scan_fast():
+    """
+    快速扫描：仅做 ARP + 主机名解析，不做端口枚举，降低耗时。
+    输出结构与 scan_lan_devices 相同字段，但 open_ports 为空，分类可能较粗略。
+    """
+    from .scan import get_all_networks as _get_all_networks, scan_network as _scan_network, _resolve_hostname as _resolve_hostname  # type: ignore
+    networks = _get_all_networks()
+    seen_ips = set()
+    devices = []
+    for cidr in networks:
+        for dev in _scan_network(cidr):
+            ip = dev.get("ip")
+            mac = dev.get("mac")
+            if not ip or ip in seen_ips:
+                continue
+            seen_ips.add(ip)
+            hostname = _resolve_hostname(ip)
+            name = hostname or ip
+            devices.append(
+                {
+                    "ip": ip,
+                    "mac": mac,
+                    "hostname": hostname,
+                    "open_ports": [],
+                    "category": "unknown",
+                    "name": name,
+                }
+            )
+    groups = {"camera": [], "computer": [], "printer": [], "network": [], "iot": [], "unknown": []}
+    for d in devices:
+        groups.setdefault(d["category"], []).append(d)
+    return {"networks": networks, "devices": devices, "groups": groups}
 
 
 if __name__ == "__main__":

@@ -1944,9 +1944,9 @@ const handleSubmit = async (event) => {
       };
 
       try {
-        updateStatus(form, "info", "尝试在本机扫描...", "正在连接本地扫描助手");
-        const localUrl = `${getLocalScannerBaseUrl()}/scan`;
-        const res = await fetchWithTimeout(localUrl, 5000);
+        updateStatus(form, "info", "尝试在本机扫描...", "本地扫描进行中，预计 5-20 秒");
+        const localUrl = `${getLocalScannerBaseUrl()}/scan?fast=1`;
+        const res = await fetchWithTimeout(localUrl, 20000);
         if (res.ok) {
           const payload = await res.json();
           updateStatus(form, "success", "本地扫描完成", `共发现 ${Array.isArray(payload.devices) ? payload.devices.length : 0} 台设备`);
