@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -281,6 +281,100 @@ async def api_url_to_mp4(video_url: str = Form(...)):
         "job_id": job_id,
         "archive": build_file_url(zip_path),
         "files": [build_file_url(path) for path in iter_files(downloads_dir)],
+    }
+
+
+@app.post("/api/tasks/url-to-qrcode")
+async def api_url_to_qrcode(
+    target_url: str = Form(...),
+):
+    """
+    根据用户提交的网页链接生成二维码图片。
+    返回可直接访问与预览的 PNG 文件 URL。
+    """
+    job_id, job_dir = create_job_dir("url-to-qrcode")
+    png_path = job_dir / "qrcode.png"
+
+    try:
+        import qrcode  # type: ignore
+        from qrcode.constants import ERROR_CORRECT_M  # type: ignore
+
+        url = (target_url or "").strip()
+        if not url:
+            raise ValueError("请输入有效的链接地址")
+
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=ERROR_CORRECT_M,
+            box_size=10,
+            border=2,
+        )
+        qr.add_data(url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        img.save(png_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    file_url = build_file_url(png_path)
+    return {
+        "message": "二维码已生成，请扫描或下载图片",
+        "job_id": job_id,
+        "files": [file_url],
+        "previews": [file_url],
+        "total_files": 1,
+    }
+
+
+@app.post("/api/tasks/mp3-to-qrcode")
+async def api_mp3_to_qrcode(
+    request: Request,
+    audio: UploadFile = File(...),
+):
+    """
+    接收用户上传的 MP3 文件，保存并生成指向该文件的二维码。
+    二维码内容为该音频文件的绝对访问 URL，扫码即可在手机端直接播放。
+    """
+    job_id, job_dir = create_job_dir("mp3-to-qrcode")
+    audio_path = job_dir / audio.filename
+    save_upload_file(audio, audio_path)
+
+    # 基础校验：仅允许 .mp3
+    if audio_path.suffix.lower() != ".mp3":
+        raise HTTPException(status_code=400, detail="仅支持上传 .mp3 文件")
+
+    # 构造音频的相对与绝对 URL
+    audio_rel_url = build_file_url(audio_path)
+    base_url = str(request.base_url).rstrip("/")
+    audio_abs_url = f"{base_url}{audio_rel_url}"
+
+    # 生成二维码（PNG）
+    png_path = job_dir / "qrcode.png"
+    try:
+        import qrcode  # type: ignore
+        from qrcode.constants import ERROR_CORRECT_M  # type: ignore
+
+        qr = qrcode.QRCode(
+            version=None,
+            error_correction=ERROR_CORRECT_M,
+            box_size=10,
+            border=2,
+        )
+        qr.add_data(audio_abs_url)
+        qr.make(fit=True)
+        img = qr.make_image(fill_color="black", back_color="white")
+        img.save(png_path)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    qr_url = build_file_url(png_path)
+    return {
+        "message": "已生成扫码播放的二维码",
+        "job_id": job_id,
+        "files": [qr_url, audio_rel_url],  # 同时返回二维码与音频文件
+        "previews": [qr_url],              # 结果预览展示二维码
+        "audio_url": audio_rel_url,        # 便于前端可选显示
+        "total_files": 2,
     }
 
 

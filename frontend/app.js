@@ -1080,6 +1080,64 @@ const MODULES = [
     }
   },
   {
+    id: "url-to-qrcode",
+    name: "URL 转二维码",
+    summary: "输入网址，生成可扫码访问的二维码图片。",
+    description:
+      "提交任意可访问的网址，后台将生成 PNG 格式的二维码，移动端扫码即可打开对应页面。",
+    endpoint: "/api/tasks/url-to-qrcode",
+    tags: [
+      { id: "tool", label: "工具" },
+      { id: "qrcode", label: "二维码" }
+    ],
+    fields: [
+      {
+        id: "target_url",
+        type: "text",
+        label: "网址链接",
+        placeholder: "https://example.com",
+        required: true,
+        description: "请输入完整链接（含 http/https）。"
+      }
+    ],
+    guide: {
+      title: "使用提示",
+      tips: [
+        "生成后可直接在结果中预览与下载二维码图片。",
+        "请确保目标链接可在当前网络环境正常访问。"
+      ]
+    }
+  },
+  {
+    id: "mp3-to-qrcode",
+    name: "MP3 扫码播放",
+    summary: "上传 MP3，生成可扫码播放的二维码。",
+    description:
+      "网站托管你上传的 MP3，并生成指向该音频文件的二维码，手机扫码即可直接播放。",
+    endpoint: "/api/tasks/mp3-to-qrcode",
+    tags: [
+      { id: "tool", label: "工具" },
+      { id: "audio", label: "音频" }
+    ],
+    fields: [
+      {
+        id: "audio",
+        type: "file",
+        label: "MP3 文件",
+        accept: "audio/mpeg,.mp3,audio/*",
+        required: true,
+        description: "仅支持 .mp3 文件，建议文件名使用英文/数字。"
+      }
+    ],
+    guide: {
+      title: "使用说明",
+      tips: [
+        "提交后结果中会展示二维码预览与音频文件链接。",
+        "二维码内容为音频的绝对 URL，扫码即可在手机端直接播放。"
+      ]
+    }
+  },
+  {
     id: "mp4-to-live-photo",
     name: "Live Photo 生成",
     summary: "将短视频转换为 iOS 实况照片格式。",
@@ -1971,7 +2029,25 @@ const handleSubmit = async (event) => {
       });
 
       if (!response.ok) {
-        throw new Error(`请求失败，状态码 ${response.status}`);
+        // 优先解析后端返回的 JSON/文本错误详情
+        let detail = `请求失败，状态码 ${response.status}`;
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await response.json();
+            if (data && typeof data.detail === "string" && data.detail.trim() !== "") {
+              detail = data.detail.trim();
+            } else if (typeof data.message === "string" && data.message.trim() !== "") {
+              detail = data.message.trim();
+            }
+          } else {
+            const text = await response.text();
+            if (text && text.trim() !== "") detail = text.trim();
+          }
+        } catch (_e) {
+          // 忽略解析错误，保留默认 detail
+        }
+        throw new Error(detail);
       }
 
       const result = await response.json().catch(() => ({ message: "提交成功" }));

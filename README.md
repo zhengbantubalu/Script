@@ -152,6 +152,8 @@ python -m http.server 4173
 | `/api/tasks/network-scan` | `network_range`（可选） | `devices`（列表，含 IP、MAC 等） |
 | `/api/tasks/folder-split` | `source_dir`、`file_extension`、`num_folders` | `source_dir` |
 | `/api/tasks/url-to-mp4` | `video_url` | `archive`、`files` |
+| `/api/tasks/url-to-qrcode` | `target_url` | `files`、`previews` |
+| `/api/tasks/mp3-to-qrcode` | `audio`（.mp3 文件） | `files`、`previews` |
 | `/api/tasks/yolo-json-to-txt` | `classes`、`json_archive` | `archive`、`files` |
 | `/api/tasks/yolo-label-vis` | `annotations_archive`、`images_archive`、`class_names` | `archive`、`files` |
 | `/api/tasks/yolo-write-img-path` | `images_root`、`image_sets_archive`、`image_ext` | `archive`、`files` |
