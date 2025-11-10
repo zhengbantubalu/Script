@@ -666,6 +666,21 @@ def watch_page(request: Request, file: str, title: Optional[str] = None) -> HTML
         border-radius: 12px; overflow: hidden; background: #000;
         border: 1px solid rgba(255,255,255,0.08);
         box-shadow: 0 18px 36px rgba(0,0,0,0.35);
+        position: relative;
+      }}
+      .fs-btn {{
+        position: absolute; right: 10px; bottom: 10px;
+        width: 36px; height: 36px; border-radius: 8px;
+        border: 1px solid rgba(255,255,255,0.18);
+        background: rgba(0,0,0,0.35);
+        cursor: pointer; backdrop-filter: blur(2px);
+      }}
+      .fs-btn:hover {{ background: rgba(0,0,0,0.5); }}
+      .fs-btn::before {{
+        content: ""; display: block; width: 100%; height: 100%;
+        -webkit-mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill=\"%23fff\" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm0-4h3V7h2v5H7V7zm7 7h3v-3h2v5h-5v-2zm0-7V5h5v2h-3v3h-2z"/></svg>') no-repeat center / 70% 70%;
+        mask: url('data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill=\"%23fff\" viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm0-4h3V7h2v5H7V7zm7 7h3v-3h2v5h-5v-2zm0-7V5h5v2h-3v3h-2z"/></svg>') no-repeat center / 70% 70%;
+        background: linear-gradient(135deg, var(--accent), var(--accent2));
       }}
       video {{ width: 100%; height: auto; display: block; background: #000; }}
       .actions {{ display: flex; gap: 12px; flex-wrap: wrap; margin-top: 4px; }}
@@ -684,8 +699,9 @@ def watch_page(request: Request, file: str, title: Optional[str] = None) -> HTML
       <h1 class="title">{display_title}</h1>
       <p class="subtitle">扫码直达 · 简洁观看页</p>
       <section class="player">
-        <div class="stage">
-          <video controls preload="metadata" playsinline src="{video_url}"></video>
+        <div class="stage" id="stage">
+          <video id="video" controls preload="metadata" playsinline src="{video_url}"></video>
+          <button class="fs-btn" id="fsBtn" type="button" aria-label="全屏"></button>
         </div>
         <div class="actions">
           <a class="btn link" href="{video_url}" download>下载视频</a>
@@ -708,6 +724,31 @@ def watch_page(request: Request, file: str, title: Optional[str] = None) -> HTML
               setTimeout(() => (btn.textContent = '复制观看链接'), 1500);
             }}
           }});
+        }}
+        /**
+         * @function requestFullscreenCompat
+         * @description 以最大兼容性请求全屏（标准、WebKit、iOS）
+         * @param {{HTMLVideoElement|HTMLElement}} el 目标元素
+         * @returns {{Promise<void>}}
+         */
+        const requestFullscreenCompat = (el) => {{
+          // iOS Safari（旧版）仅支持 video.webkitEnterFullscreen()
+          if (el && typeof el.webkitEnterFullscreen === 'function') {{
+            try {{ el.webkitEnterFullscreen(); }} catch (_e) {{ /* noop */ }}
+            return Promise.resolve();
+          }}
+          const target = el.requestFullscreen ? el : (document.getElementById('stage') || el);
+          const req = target.requestFullscreen
+            || target.webkitRequestFullscreen
+            || target.msRequestFullscreen
+            || target.mozRequestFullScreen;
+          return req ? Promise.resolve(req.call(target)) : Promise.resolve();
+        }};
+
+        const fsBtn = document.getElementById('fsBtn');
+        const video = document.getElementById('video');
+        if (fsBtn && video) {{
+          fsBtn.addEventListener('click', () => requestFullscreenCompat(video));
         }}
       }})();
     </script>
