@@ -1990,6 +1990,23 @@ const renderResult = (form, module, payload) => {
       }
     }
 
+    // 特例：MP4 -> GIF 模块，提供“复制 GIF”按钮（写入系统剪贴板）
+    if (
+      module.id === "mp4-to-gif" &&
+      Array.isArray(payload.files) &&
+      payload.files.length > 0
+    ) {
+      const first = payload.files[0];
+      if (typeof first === "string" && first.trim() !== "") {
+        const viewUrl = resolveFileUrl(first);
+        const downloadUrl = buildDownloadUrl(first);
+        actionItems.push(
+          `<a class="button" href="${downloadUrl}">下载 GIF</a>`,
+          `<button class="button" type="button" data-copy-gif data-src="${viewUrl}">复制 GIF</button>`
+        );
+      }
+    }
+
     // 兜底：如果没有压缩包按钮，但返回了文件列表，则提供一个“直接下载”按钮
     if (actionItems.length === 0 && Array.isArray(payload.files) && payload.files.length > 0) {
       const firstFile = payload.files[0];
@@ -2052,6 +2069,10 @@ const renderResult = (form, module, payload) => {
           const fullUrl = resolveFileUrl(previewUrl);
           const downloadUrl = buildDownloadUrl(previewUrl);
           const filename = previewUrl.split("/").pop() || `file-${index + 1}`;
+          const copyBtn =
+            module.id === "mp4-to-gif"
+              ? `<button class="preview-grid__copy" type="button" data-copy-gif data-src="${fullUrl}">复制</button>`
+              : "";
           return `
             <figure class="preview-grid__item">
               <button
@@ -2065,6 +2086,7 @@ const renderResult = (form, module, payload) => {
               <figcaption class="preview-grid__caption">
                 <span class="preview-grid__label">预览 ${index + 1}</span>
                 <a class="preview-grid__download" href="${downloadUrl}" download="${filename}">下载</a>
+                ${copyBtn}
               </figcaption>
             </figure>
           `;
@@ -2343,6 +2365,55 @@ const bindEvents = () => {
       if (form instanceof HTMLFormElement) {
         updateStatus(form, "success", "已下载启动脚本", "macOS: 赋予执行权限并运行；Windows: 双击运行 .bat");
       }
+      return;
+    }
+
+    // 复制 GIF 到系统剪贴板
+    if (target.matches("[data-copy-gif]")) {
+      event.preventDefault();
+      const form = target.closest("form");
+      const src = target.getAttribute("data-src") || "";
+      if (!(form instanceof HTMLFormElement) || !src) {
+        return;
+      }
+      /**
+       * @function copyGifToClipboard
+       * @description 尝试将 GIF 二进制写入系统剪贴板；若不支持则退化为复制 URL
+       * @param {string} url 资源的可访问 URL
+       * @returns {Promise<void>}
+       */
+      const copyGifToClipboard = async (url) => {
+        try {
+          // 优先写入图片到剪贴板（需安全上下文/权限）
+          if (navigator.clipboard && typeof window.ClipboardItem === "function") {
+            const res = await fetch(url, { mode: "cors" });
+            if (!res.ok) throw new Error(`获取 GIF 失败：HTTP ${res.status}`);
+            const blob = await res.blob();
+            // 限定为 GIF MIME
+            const item = new window.ClipboardItem({ "image/gif": blob });
+            await navigator.clipboard.write([item]);
+            updateStatus(form, "success", "已复制 GIF 到剪贴板", "可直接在聊天/文档中粘贴图片");
+            return;
+          }
+          // 回退：复制 URL
+          await navigator.clipboard.writeText(url);
+          updateStatus(form, "success", "已复制 GIF 链接", url);
+        } catch (err) {
+          // 再次回退：尝试复制 URL，即便 clipboard API 不可用
+          try {
+            if (navigator.clipboard) {
+              await navigator.clipboard.writeText(url);
+              updateStatus(form, "success", "已复制 GIF 链接", url);
+            } else {
+              updateStatus(form, "error", "复制失败", String(err && err.message ? err.message : err));
+            }
+          } catch (e) {
+            updateStatus(form, "error", "复制失败", String(e && e.message ? e.message : e));
+          }
+        }
+      };
+      updateStatus(form, "info", "正在复制 GIF...", "");
+      void copyGifToClipboard(src);
       return;
     }
 
