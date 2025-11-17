@@ -526,6 +526,7 @@ const renderExtractFramesFields = (module) => {
   const startField = findField("start_sec");
   const endField = findField("end_sec");
   const fpsField = findField("n_fps");
+  const scaleField = findField("scale");
 
   return `
     <div class="form__group form__group--video">
@@ -629,39 +630,32 @@ const renderExtractFramesFields = (module) => {
     </div>
     ${
       fpsField
-        ? `<div class="form__group">
-      <label class="form__label" for="extract-fps-input">${fpsField?.label ?? "抽帧帧率"}<sup>*</sup></label>
+        ? `
+    <div class="form__group">
+      <label class="form__label" for="extract-fps-input">${fpsField.label ?? "抽帧帧率"}<sup>*</sup></label>
       <div class="fps-control">
-        <input
-          class="fps-control__slider"
-          type="range"
-          min="1"
-          max="60"
-          value="5"
-          step="1"
-          data-fps-range
-        />
+        <input class="fps-control__slider" type="range" min="1" max="60" value="5" step="1" data-fps-range />
         <div class="fps-control__value">
-          <input
-            class="input input--condensed"
-            type="number"
-            min="1"
-            max="60"
-            step="1"
-            value="5"
-            name="n_fps"
-            id="extract-fps-input"
-            required
-            data-fps-input
-          />
+          <input class="input input--condensed" type="number" min="1" max="60" step="1" value="5" name="n_fps" id="extract-fps-input" required data-fps-input />
           <span class="fps-control__suffix">fps</span>
         </div>
       </div>
-      ${
-        fpsField?.description
-          ? `<p class="form__hint">${fpsField.description}</p>`
-          : ""
-      }
+      ${fpsField.description ? `<p class="form__hint">${fpsField.description}</p>` : ""}
+    </div>`
+        : ""
+    }
+    ${
+      scaleField
+        ? `
+    <div class="form__group">
+      <label class="form__label" for="extract-scale-select">${scaleField.label ?? "分辨率缩放"}</label>
+      <select class="select" name="scale" id="extract-scale-select">
+        <option value="1">原始（100%）</option>
+        <option value="0.75">75%</option>
+        <option value="0.5">50%</option>
+        <option value="0.33">33%</option>
+      </select>
+      ${scaleField.description ? `<p class="form__hint">${scaleField.description}</p>` : ""}
     </div>`
         : ""
     }
@@ -1214,12 +1208,20 @@ const MODULES = [
         type: "number",
         label: "结束时间（秒）",
         placeholder: "留空表示处理到视频末尾"
+      },
+      // 保持源视频帧率，不提供 n_fps
+      {
+        id: "scale",
+        type: "select",
+        label: "分辨率缩放",
+        options: ["原始（100%）", "75%", "50%", "33%"],
+        description: "用于减小 GIF 体积（仅缩小，不放大）。"
       }
     ],
     guide: {
       title: "导出建议",
       tips: [
-        "GIF 文件体积与时长、分辨率相关；本模块保持源视频帧率导出。",
+        "GIF 文件体积与时长、分辨率、帧率相关，必要时缩短区间或降低帧率。",
         "若需更小文件，可在导出后使用压缩工具进一步处理。"
       ]
     }

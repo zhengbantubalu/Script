@@ -155,6 +155,7 @@ async def api_mp4_to_gif(
     start_sec: Optional[float] = Form(None),
     end_sec: Optional[float] = Form(None),
     color_depth: Optional[int] = Form(None),
+    scale: Optional[float] = Form(None),
 ):
     if convert_mp4_to_gif is None:
         raise HTTPException(status_code=503, detail="GIF 转换功能暂时不可用，请稍后重试")
@@ -168,8 +169,11 @@ async def api_mp4_to_gif(
 
     # 归一化参数
     start = float(start_sec) if start_sec is not None else 0.0
-    fps = None  # 保持源视频帧率
     colors = int(color_depth) if color_depth is not None else 256
+    scl = float(scale) if scale is not None else 1.0
+    # 约束缩放范围（0.1, 1.0]
+    if not (0.1 <= scl <= 1.0):
+        scl = 1.0
 
     # mp4_to_gif 需要数值型 end_time；若未提供，则读取视频时长
     if end_sec is None:
@@ -189,8 +193,9 @@ async def api_mp4_to_gif(
             output_path=str(output_path),
             start_time=start,
             end_time=end,
-            fps=fps,
+            fps=None,  # 使用源视频帧率
             color_depth=colors,
+            scale=scl,
         )
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=400, detail=str(exc)) from exc

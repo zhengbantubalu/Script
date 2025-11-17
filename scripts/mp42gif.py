@@ -2,7 +2,7 @@ from moviepy import VideoFileClip
 import os
 from PIL import Image
 
-def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_depth=256):
+def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_depth=256, scale=1.0):
     # 检查输入文件是否存在
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"输入文件 {input_path} 不存在")
@@ -24,24 +24,39 @@ def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_de
             print("开始时间不能大于结束时间，将使用整个视频")
             start_time = 0
             end_time = clip.duration
-
-        # 采用源视频帧率（未指定 fps 时）
-        effective_fps = fps if fps else getattr(clip, "fps", None)
-        if not effective_fps or effective_fps <= 0:
-            effective_fps = 10
-
+            
         # 将剪辑后的视频转换为 GIF
         # 使用 PIL 写入 GIF，可以更好地控制颜色和优化
         frames = []
         
-        # 直接使用 iter_frames 方法来生成帧，无需创建子剪辑
-        for t in range(int(start_time * effective_fps), int(end_time * effective_fps)):
-            frame_time = t / effective_fps
+        # 自动使用源视频帧率（若未显式指定）
+        fps_value = None
+        try:
+            fps_value = float(fps) if fps is not None else float(clip.fps)
+            if not (fps_value and fps_value > 0):
+                fps_value = 10.0
+        except Exception:
+            fps_value = 10.0
+
+        # 直接使用 get_frame 采样，无需创建子剪辑
+        for t in range(int(start_time * fps_value), int(end_time * fps_value)):
+            frame_time = t / fps_value
             if frame_time >= clip.duration:
                 break
             frame = clip.get_frame(frame_time)
             # 将每一帧转换为 PIL 图像
             img = Image.fromarray(frame)
+            # 按比例缩放（如需要）
+            try:
+                s = float(scale) if scale is not None else 1.0
+            except Exception:
+                s = 1.0
+            s = max(0.1, min(1.0, s))
+            if s != 1.0:
+                new_w = max(1, int(img.width * s))
+                new_h = max(1, int(img.height * s))
+                resample = getattr(Image, "Resampling", Image).__dict__.get("LANCZOS", Image.LANCZOS)
+                img = img.resize((new_w, new_h), resample=resample)
             frames.append(img)
         
         # 保存为 GIF
@@ -49,7 +64,7 @@ def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_de
             output_path,
             save_all=True,
             append_images=frames[1:],
-            duration=int(1000 / effective_fps),  # 每帧显示时间(毫秒)
+            duration=int(1000 / fps_value),  # 每帧显示时间(毫秒)
             loop=0,  # 无限循环
             palette=Image.Palette.ADAPTIVE,  # 自动生成调色板
             optimize=True,
