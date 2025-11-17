@@ -2,7 +2,7 @@ from moviepy import VideoFileClip
 import os
 from PIL import Image
 
-def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_depth=256, scale=1.0):
+def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_depth=256, scale=1.0, dither=True):
     # 检查输入文件是否存在
     if not os.path.exists(input_path):
         raise FileNotFoundError(f"输入文件 {input_path} 不存在")
@@ -57,18 +57,28 @@ def mp4_to_gif(input_path, output_path, start_time, end_time, fps=None, color_de
                 new_h = max(1, int(img.height * s))
                 resample = getattr(Image, "Resampling", Image).__dict__.get("LANCZOS", Image.LANCZOS)
                 img = img.resize((new_w, new_h), resample=resample)
-            frames.append(img)
+
+            # 自适应调色板 + Floyd–Steinberg 抖动，尽量接近原视频色彩与过渡
+            # GIF 仅支持 256 色，通过逐帧量化可以比全局量化显著减少色带
+            colors = int(color_depth) if color_depth is not None else 256
+            colors = max(2, min(256, colors))
+            dither_flag = Image.FLOYDSTEINBERG if dither else Image.NONE
+            # convert("P", palette=ADAPTIVE) 等价于量化；部分版本对 dithering 更稳定
+            img_q = img.convert("P", palette=Image.ADAPTIVE, colors=colors, dither=dither_flag)
+            frames.append(img_q)
         
         # 保存为 GIF
+        if not frames:
+            raise ValueError("未采样到任何帧，请检查起止时间设置")
+
         frames[0].save(
             output_path,
             save_all=True,
             append_images=frames[1:],
             duration=int(1000 / fps_value),  # 每帧显示时间(毫秒)
             loop=0,  # 无限循环
-            palette=Image.Palette.ADAPTIVE,  # 自动生成调色板
             optimize=True,
-            colors=color_depth
+            disposal=2,  # 每帧独立绘制，减少拖影
         )
         
         print(f"GIF 已成功保存到 {output_path}")
