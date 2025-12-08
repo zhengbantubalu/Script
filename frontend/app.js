@@ -546,7 +546,7 @@ const renderExtractFramesFields = (module) => {
           : ""
       }
     </div>
-    <div class="video-preview" data-video-preview>
+    <div class="video-preview-container" data-video-preview>
       <div class="video-preview__placeholder" data-video-placeholder>
         <div class="video-preview__placeholder-icon"></div>
         <div class="video-preview__placeholder-text">
@@ -571,6 +571,11 @@ const renderExtractFramesFields = (module) => {
         <div class="video-preview__meta">
           <span>当前时间：<strong data-current-display>00.00s</strong></span>
           <span>视频时长：<strong data-duration-display>--</strong></span>
+        </div>
+        <div class="video-preview__actions">
+          <button class="button button--primary" type="button" data-save-frame>
+            保存当前帧
+          </button>
         </div>
       </div>
       <div class="video-toolbar" hidden data-video-toolbar>
@@ -788,6 +793,9 @@ const setupExtractFramesForm = (form) => {
   const endButton = form.querySelector("[data-set-end]");
   const fpsRange = form.querySelector("[data-fps-range]");
   const fpsInput = form.querySelector("[data-fps-input]");
+  const saveFrameButton = form.querySelector("[data-save-frame]");
+  const statusPanel = form.querySelector("[data-status-panel]");
+  const resultPanel = form.querySelector("[data-result-panel]");
 
   if (
     !fileInput ||
@@ -1037,6 +1045,107 @@ const setupExtractFramesForm = (form) => {
   }
   resetSelections();
   togglePreview(false);
+
+  /**
+   * 保存当前时刻的单帧图片。
+   * @returns {Promise<void>}
+   */
+  const saveCurrentFrame = async () => {
+    const [file] = fileInput.files ?? [];
+    if (!file) {
+      if (statusPanel) {
+        updateStatus(form, "error", "请先上传视频文件", "");
+      }
+      return;
+    }
+
+    const currentTime = clampToDuration(video.currentTime);
+    if (!Number.isFinite(currentTime) || currentTime < 0) {
+      if (statusPanel) {
+        updateStatus(form, "error", "无法获取当前视频时刻", "");
+      }
+      return;
+    }
+
+    // 显示处理状态
+    if (statusPanel) {
+      updateStatus(form, "info", "正在保存当前帧...", `时刻: ${formatSeconds(currentTime)}`);
+    }
+
+    try {
+      const formData = new FormData();
+      formData.append("video", file);
+      formData.append("timestamp", String(currentTime.toFixed(2)));
+
+      const endpoint = resolveEndpointUrl("/api/tasks/extract-single-frame");
+      const response = await fetch(endpoint, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (!response.ok) {
+        let detail = `请求失败，状态码 ${response.status}`;
+        try {
+          const contentType = response.headers.get("content-type") || "";
+          if (contentType.includes("application/json")) {
+            const data = await response.json();
+            if (data && typeof data.detail === "string" && data.detail.trim() !== "") {
+              detail = data.detail.trim();
+            } else if (typeof data.message === "string" && data.message.trim() !== "") {
+              detail = data.message.trim();
+            }
+          } else {
+            const text = await response.text();
+            if (text && text.trim() !== "") detail = text.trim();
+          }
+        } catch (_e) {
+          // 忽略解析错误
+        }
+        throw new Error(detail);
+      }
+
+      const result = await response.json();
+      const successMessage =
+        typeof result.message === "string" && result.message.trim() !== ""
+          ? result.message.trim()
+          : "帧图片保存成功";
+      const metaText = result.job_id ? `任务编号：${result.job_id}` : "";
+
+      if (statusPanel) {
+        updateStatus(form, "success", successMessage, metaText);
+      }
+
+      // 显示结果
+      if (resultPanel) {
+        renderResult(
+          form,
+          {
+            id: "extract-single-frame",
+            name: "单帧提取",
+            tags: [{ id: "media", label: "视频处理" }],
+          },
+          result
+        );
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof TypeError
+          ? `无法连接后端服务：${error.message}`
+          : error instanceof Error
+            ? error.message
+            : "未知错误";
+      if (statusPanel) {
+        updateStatus(form, "error", "保存失败", errorMessage);
+      }
+    }
+  };
+
+  // 绑定保存单帧按钮事件
+  if (saveFrameButton instanceof HTMLButtonElement) {
+    saveFrameButton.addEventListener("click", () => {
+      void saveCurrentFrame();
+    });
+  }
 };
 
 /**
@@ -1066,13 +1175,38 @@ const buildDownloadUrl = (path) => {
   }
   let filesPath = "";
   try {
-    const u = new URL(path, BACKEND_BASE_URL);
-    const pn = u.pathname || "";
-    filesPath = pn.includes("/files/") ? pn.slice(pn.indexOf("/files/")) : pn;
+    // 如果是绝对 URL，提取路径部分（URL 对象会自动解码 pathname）
+    if (path.startsWith("http://") || path.startsWith("https://")) {
+      const u = new URL(path);
+      filesPath = u.pathname || "";
+    } else {
+      // 如果是相对路径，先尝试解码（可能已经被编码过）
+      try {
+        filesPath = decodeURIComponent(path);
+      } catch (_e) {
+        // 如果解码失败，说明路径未编码，直接使用
+        filesPath = path;
+      }
+    }
+    // 确保以 /files/ 开头
+    if (filesPath.includes("/files/")) {
+      filesPath = filesPath.slice(filesPath.indexOf("/files/"));
+    } else if (!filesPath.startsWith("/files/")) {
+      filesPath = `/files/${filesPath}`;
+    }
   } catch (_e) {
-    filesPath = path;
+    // 如果解析失败，尝试直接使用路径
+    try {
+      filesPath = decodeURIComponent(path);
+      if (!filesPath.startsWith("/files/")) {
+        filesPath = `/files/${filesPath}`;
+      }
+    } catch (_e2) {
+      filesPath = path.startsWith("/files/") ? path : `/files/${path}`;
+    }
   }
   const url = new URL("/api/download", BACKEND_BASE_URL);
+  // searchParams.set 会自动编码参数值，确保只编码一次
   url.searchParams.set("path", filesPath);
   return url.toString();
 };

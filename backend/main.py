@@ -84,14 +84,16 @@ def health_check() -> JSONResponse:
 @app.get("/api/download")
 def api_download(path: str):
     """
-    以“附件下载”方式返回存储目录下的文件，避免浏览器直接在线预览。
+    以"附件下载"方式返回存储目录下的文件，避免浏览器直接在线预览。
     仅允许以 /files/ 开头的路径。
     """
     try:
-        cleaned = (path or "").strip()
+        # 解码 URL 编码的路径（处理中文字符等情况）
+        cleaned = unquote((path or "").strip())
         if not cleaned.startswith("/files/"):
             raise ValueError("非法文件路径")
         rel = cleaned[len("/files/") :]
+        # 处理路径中的特殊字符，确保路径正确
         file_path = STORAGE_DIR / rel
         if not file_path.exists() or not file_path.is_file():
             raise FileNotFoundError("文件不存在")
@@ -247,6 +249,72 @@ async def api_extract_frames(
         "files": files_urls,
         "total_files": len(files_urls),
         "previews": previews,
+    }
+
+
+@app.post("/api/tasks/extract-single-frame")
+async def api_extract_single_frame(
+    video: UploadFile = File(...),
+    timestamp: float = Form(...),
+):
+    """
+    提取视频指定时刻的单帧图片。
+    用户通过拖动进度条选择时刻，保存该时刻的原图。
+    """
+    import cv2
+
+    job_id, job_dir = create_job_dir("extract-single-frame")
+    video_path = job_dir / video.filename
+    save_upload_file(video, video_path)
+
+    try:
+        # 打开视频文件
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise IOError("无法打开视频文件")
+
+        # 获取视频属性
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+
+        # 验证时间戳有效性
+        if timestamp < 0 or (duration > 0 and timestamp > duration):
+            cap.release()
+            raise ValueError(f"无效时间戳 (视频时长: {duration:.2f}秒)")
+
+        # 将秒转换为帧号
+        frame_number = int(timestamp * fps) if fps > 0 else 0
+        frame_number = min(frame_number, total_frames - 1) if total_frames > 0 else 0
+
+        # 定位到指定帧
+        cap.set(cv2.CAP_PROP_POS_FRAMES, frame_number)
+        ret, frame = cap.read()
+
+        if not ret:
+            cap.release()
+            raise ValueError("无法读取指定时刻的视频帧")
+
+        # 生成输出文件名
+        filename = video_path.stem
+        frame_filename = f"{filename}_frame_{timestamp:.2f}s.jpg"
+        frame_path = job_dir / frame_filename
+
+        # 保存帧图片
+        cv2.imwrite(str(frame_path), frame)
+        cap.release()
+
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    file_url = build_file_url(frame_path)
+    return {
+        "message": f"已保存 {timestamp:.2f} 秒时刻的帧图片",
+        "job_id": job_id,
+        "files": [file_url],
+        "previews": [file_url],
+        "total_files": 1,
+        "timestamp": timestamp,
     }
 
 

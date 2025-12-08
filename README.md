@@ -66,14 +66,42 @@ pip install -r requirements.txt
 
 ## 运行后端服务
 
+**重要：必须在项目根目录下运行后端服务，而不是在 `scripts` 或 `backend` 目录下。**
+
+### 方式一：使用启动脚本（推荐）
+
+**Windows:**
 ```bash
-cd /Volumes/KIOXIA/Scripts/web
+# 在项目根目录下双击运行，或在 PowerShell 中执行：
+.\start_server.bat
+```
+
+**macOS/Linux:**
+```bash
+# 在项目根目录下执行：
+chmod +x start_server.sh
+./start_server.sh
+```
+
+### 方式二：手动运行
+
+```bash
+# 首先切换到项目根目录
+cd E:\scripts_web  # Windows 示例路径
+# 或
+cd /path/to/scripts_web  # macOS/Linux 示例路径
+
+# 然后启动服务
 uvicorn backend.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 - 启动后，接口根路径为 `http://<server>:8000`。
 - 健康检查地址：`GET /api/health`。
 - 静态文件路径：`/files/...` 映射到 `backend/storage/`。
+
+**常见错误：**
+- 如果在 `scripts` 目录下运行，会出现 `ModuleNotFoundError: No module named 'backend'` 错误
+- 解决方法：切换到项目根目录（包含 `backend`、`frontend`、`scripts` 三个目录的目录）再运行
 
 ### 作业目录与文件存储
 
