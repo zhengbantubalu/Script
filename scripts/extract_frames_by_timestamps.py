@@ -111,6 +111,37 @@ def get_txt_files(input_path: str) -> List[str]:
     return sorted(txt_files)
 
 
+def find_video_file(txt_path: str, video_dir: str) -> str:
+    """
+    根据txt文件名在视频文件夹中查找对应的同名视频文件。
+    
+    @param txt_path: txt文件路径
+    @param video_dir: 视频文件夹路径
+    @return: 找到的视频文件路径
+    """
+    # 支持的视频格式
+    video_extensions = ['.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.m4v', '.webm', '.3gp']
+    
+    # 获取txt文件名（不含扩展名）
+    txt_basename = os.path.splitext(os.path.basename(txt_path))[0]
+    
+    # 在视频文件夹中查找同名视频文件
+    for root, dirs, files in os.walk(video_dir):
+        for file in files:
+            file_basename = os.path.splitext(file)[0]
+            file_ext = os.path.splitext(file)[1].lower()
+            
+            # 检查文件名是否匹配且扩展名是视频格式
+            if file_basename == txt_basename and file_ext in video_extensions:
+                return os.path.join(root, file)
+    
+    # 如果没找到，抛出异常
+    raise FileNotFoundError(
+        f"在视频文件夹 {video_dir} 中未找到与 {txt_path} 同名的视频文件。"
+        f"期望的文件名: {txt_basename} + 支持的扩展名: {', '.join(video_extensions)}"
+    )
+
+
 def extract_frames_by_timestamps(video_path: str, txt_path: str, output_dir: str):
     """
     从视频中提取指定时间点的帧并保存。
@@ -208,7 +239,7 @@ if __name__ == "__main__":
         "--video_path",
         type=str,
         required=True,
-        help="输入视频文件路径"
+        help="输入视频文件路径或文件夹路径。如果txt_path是文件夹，则video_path也必须是文件夹，每个txt文件将匹配同名的视频文件"
     )
     parser.add_argument(
         "--txt_path",
@@ -226,15 +257,48 @@ if __name__ == "__main__":
     args = parser.parse_args()
     
     try:
+        # 检查txt_path是文件还是文件夹
+        txt_is_dir = os.path.isdir(args.txt_path)
+        video_is_dir = os.path.isdir(args.video_path)
+        
+        # 验证：如果txt_path是文件夹，video_path也必须是文件夹
+        if txt_is_dir and not video_is_dir:
+            raise ValueError(
+                f"当txt_path是文件夹时，video_path也必须是文件夹。\n"
+                f"当前: txt_path={args.txt_path} (文件夹), video_path={args.video_path} (文件)"
+            )
+        
+        # 验证：如果txt_path是文件，video_path应该是文件
+        if not txt_is_dir and video_is_dir:
+            raise ValueError(
+                f"当txt_path是文件时，video_path也应该是文件。\n"
+                f"当前: txt_path={args.txt_path} (文件), video_path={args.video_path} (文件夹)"
+            )
+        
         # 获取所有txt文件
         txt_files = get_txt_files(args.txt_path)
         print(f"找到 {len(txt_files)} 个txt文件")
         
         total_saved = 0
         total_skipped = 0
+        failed_files = []
         
         # 处理每个txt文件
         for txt_file in txt_files:
+            # 确定对应的视频文件
+            if txt_is_dir:
+                # 文件夹模式：为每个txt文件查找对应的同名视频文件
+                try:
+                    video_file = find_video_file(txt_file, args.video_path)
+                    print(f"\n匹配: {os.path.basename(txt_file)} <-> {os.path.basename(video_file)}")
+                except FileNotFoundError as e:
+                    print(f"\n错误: {e}")
+                    failed_files.append(txt_file)
+                    continue
+            else:
+                # 单文件模式：使用指定的视频文件
+                video_file = args.video_path
+            
             # 如果处理多个文件，为每个txt文件创建单独的输出子目录
             if len(txt_files) > 1:
                 txt_basename = os.path.splitext(os.path.basename(txt_file))[0]
@@ -244,7 +308,7 @@ if __name__ == "__main__":
             
             try:
                 saved, skipped = extract_frames_by_timestamps(
-                    video_path=args.video_path,
+                    video_path=video_file,
                     txt_path=txt_file,
                     output_dir=txt_output_dir
                 )
@@ -252,10 +316,15 @@ if __name__ == "__main__":
                 total_skipped += skipped
             except Exception as e:
                 print(f"处理文件 {txt_file} 时出错: {str(e)}")
+                failed_files.append(txt_file)
                 continue
         
         print(f"\n{'='*60}")
         print(f"全部完成! 共处理 {len(txt_files)} 个txt文件")
+        if failed_files:
+            print(f"失败: {len(failed_files)} 个文件")
+            for failed_file in failed_files:
+                print(f"  - {failed_file}")
         print(f"总计保存 {total_saved} 张图像")
         if total_skipped > 0:
             print(f"总计跳过 {total_skipped} 个时间节点")
