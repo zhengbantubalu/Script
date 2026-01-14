@@ -29,9 +29,10 @@
  * @property {string} summary 精简说明
  * @property {string} description 详细描述
  * @property {ModuleTag[]} tags 标签
- * @property {string} endpoint 提交 API
- * @property {ModuleField[]} fields 表单字段
- * @property {ModuleGuide} guide 使用提示
+ * @property {string} [endpoint] 提交 API
+ * @property {ModuleField[]} [fields] 表单字段
+ * @property {ModuleGuide} [guide] 使用提示
+ * @property {string} [externalUrl] 外部链接地址（如果提供，点击后直接跳转到该链接）
  */
 
 /**
@@ -501,6 +502,17 @@ export const MODULES = [
       title: "输出文件",
       tips: ["最终会生成 train.txt、val.txt、trainval.txt、test.txt。", "若需固定随机种子，请联系管理员在后端扩展。"]
     }
+  },
+  {
+    id: "scholar-search",
+    name: "学术搜索",
+    summary: "聚合检索 OpenAlex + Crossref + arXiv，让科研更高效。",
+    description: "ScholarSearch 是一个强大的学术文献搜索平台，支持多数据源检索和智能推荐。",
+    tags: [
+      { id: "search", label: "学术搜索" },
+      { id: "research", label: "科研工具" }
+    ],
+    externalUrl: "http://47.93.189.31:3000/"
   }
 ];
 

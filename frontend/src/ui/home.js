@@ -19,7 +19,15 @@ const buildStats = () => {
 export const renderHome = () => {
   const { total, media, automation } = buildStats();
   const cards = MODULES.map(
-    (module) => `
+    (module) => {
+      const isExternalLink = module.externalUrl;
+      const actionButton = isExternalLink
+        ? `<a class="button" href="${module.externalUrl}" target="_blank" rel="noopener noreferrer">立即使用 →</a>`
+        : `<button class="button" data-navigate="${module.id}">立即使用 →</button>`;
+      const metaInfo = isExternalLink
+        ? `<span>外部链接</span>`
+        : `<span>脚本：${module.id.replace(/-/g, "_")}.py</span>`;
+      return `
       <article class="module-card" data-module="${module.id}">
         <div class="module-card__header">
           <h3 class="module-card__title">${module.name}</h3>
@@ -29,13 +37,14 @@ export const renderHome = () => {
           </div>
         </div>
         <div class="module-card__meta">
-          <span>脚本：${module.id.replace(/-/g, "_")}.py</span>
+          ${metaInfo}
         </div>
         <div class="module-card__actions">
-          <button class="button" data-navigate="${module.id}">立即使用 →</button>
+          ${actionButton}
         </div>
       </article>
-    `
+    `;
+    }
   ).join("");
 
   render(`

@@ -1,3 +1,4 @@
+import { MODULES } from "../data/modules.js";
 import { renderHome } from "../ui/home.js";
 import { renderModule } from "../ui/modulePage.js";
 
@@ -9,6 +10,12 @@ export const resolveRoute = () => {
   const hash = window.location.hash;
   if (hash.startsWith("#/module/")) {
     const moduleId = hash.replace("#/module/", "");
+    const module = MODULES.find((item) => item.id === moduleId);
+    // 如果模块有外部链接，直接跳转
+    if (module?.externalUrl) {
+      window.location.href = module.externalUrl;
+      return;
+    }
     renderModule(moduleId);
   } else {
     renderHome();
