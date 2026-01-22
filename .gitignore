@@ -1,2 +1,11 @@
 .venv/
 backend/storage/
+
+# Python
+__pycache__/
+
+# Node
+node_modules/
+
+# MacOS
+._*
