@@ -22,6 +22,7 @@ from .utils import (
     iter_files,
     make_zip,
     save_upload_file,
+    maybe_prepare_cropped_video,
 )
 
 # 将项目根目录加入路径，方便导入现有脚本
@@ -212,10 +213,15 @@ async def api_extract_frames(
     end_sec: Optional[float] = Form(None),
     n_fps: int = Form(...),
     output_dir: str = Form("frames"),
+    crop_x: Optional[int] = Form(None),
+    crop_y: Optional[int] = Form(None),
+    crop_w: Optional[int] = Form(None),
+    crop_h: Optional[int] = Form(None),
 ):
     job_id, job_dir = create_job_dir("extract-frames")
     video_path = job_dir / video.filename
     save_upload_file(video, video_path)
+    video_path = maybe_prepare_cropped_video(job_dir, video_path, crop_x, crop_y, crop_w, crop_h)
 
     output_dir_name = output_dir.strip() or "frames"
     output_path = job_dir / output_dir_name
@@ -256,6 +262,10 @@ async def api_extract_frames(
 async def api_extract_single_frame(
     video: UploadFile = File(...),
     timestamp: float = Form(...),
+    crop_x: Optional[int] = Form(None),
+    crop_y: Optional[int] = Form(None),
+    crop_w: Optional[int] = Form(None),
+    crop_h: Optional[int] = Form(None),
 ):
     """
     提取视频指定时刻的单帧图片。
@@ -295,6 +305,20 @@ async def api_extract_single_frame(
             cap.release()
             raise ValueError("无法读取指定时刻的视频帧")
 
+        # 可选：按用户框选区域裁剪帧（像素坐标，基于原始分辨率）
+        if crop_x is not None and crop_y is not None and crop_w is not None and crop_h is not None:
+            x = max(0, int(crop_x))
+            y = max(0, int(crop_y))
+            w = max(0, int(crop_w))
+            h = max(0, int(crop_h))
+            if w > 1 and h > 1:
+                fh, fw = frame.shape[:2]
+                if x < fw and y < fh:
+                    w = min(w, fw - x)
+                    h = min(h, fh - y)
+                    if w > 1 and h > 1:
+                        frame = frame[y : y + h, x : x + w]
+
         # 生成输出文件名
         filename = video_path.stem
         frame_filename = f"{filename}_frame_{timestamp:.2f}s.jpg"
@@ -325,6 +349,10 @@ async def api_mp4_to_gif(
     end_sec: Optional[float] = Form(None),
     color_depth: Optional[int] = Form(None),
     scale: Optional[float] = Form(None),
+    crop_x: Optional[int] = Form(None),
+    crop_y: Optional[int] = Form(None),
+    crop_w: Optional[int] = Form(None),
+    crop_h: Optional[int] = Form(None),
 ):
     if convert_mp4_to_gif is None:
         raise HTTPException(status_code=503, detail="GIF 转换功能暂时不可用，请稍后重试")
@@ -332,6 +360,7 @@ async def api_mp4_to_gif(
     job_id, job_dir = create_job_dir("mp4-to-gif")
     video_path = job_dir / video.filename
     save_upload_file(video, video_path)
+    video_path = maybe_prepare_cropped_video(job_dir, video_path, crop_x, crop_y, crop_w, crop_h)
 
     # 输出 GIF 文件名采用源视频名
     output_path = job_dir / f"{video_path.stem}.gif"
@@ -411,6 +440,10 @@ async def api_mp4_to_live_photo(
     output_prefix: str = Form(...),
     duration: Optional[float] = Form(None),
     keyframe_time: Optional[float] = Form(None),
+    crop_x: Optional[int] = Form(None),
+    crop_y: Optional[int] = Form(None),
+    crop_w: Optional[int] = Form(None),
+    crop_h: Optional[int] = Form(None),
 ):
     if convert_to_live_photo is None:
         raise HTTPException(status_code=503, detail="实况照片功能暂时不可用，请稍后重试")
@@ -418,6 +451,7 @@ async def api_mp4_to_live_photo(
     job_id, job_dir = create_job_dir("mp4-to-live-photo")
     video_path = job_dir / video.filename
     save_upload_file(video, video_path)
+    video_path = maybe_prepare_cropped_video(job_dir, video_path, crop_x, crop_y, crop_w, crop_h)
 
     prefix = job_dir / (output_prefix.strip() or "live_photo")
     prefix.parent.mkdir(parents=True, exist_ok=True)
@@ -811,6 +845,10 @@ def listen_page(request: Request, file: str, title: Optional[str] = None) -> HTM
 async def api_video_to_qrcode(
     request: Request,
     video: UploadFile = File(...),
+    crop_x: Optional[int] = Form(None),
+    crop_y: Optional[int] = Form(None),
+    crop_w: Optional[int] = Form(None),
+    crop_h: Optional[int] = Form(None),
 ):
     """
     接收用户上传的视频文件，保存并生成指向“美化观看页”的二维码。
@@ -824,6 +862,9 @@ async def api_video_to_qrcode(
     valid_exts = {".mp4", ".mov", ".m4v", ".webm"}
     if video_path.suffix.lower() not in valid_exts:
         raise HTTPException(status_code=400, detail=f"仅支持视频文件（{', '.join(sorted(valid_exts))}）")
+
+    # 可选：按用户框选区域裁剪视频（像素坐标，基于原始分辨率）
+    video_path = maybe_prepare_cropped_video(job_dir, video_path, crop_x, crop_y, crop_w, crop_h)
 
     # 构造视频相对 URL 与观看页 URL
     video_rel_url = build_file_url(video_path)

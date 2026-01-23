@@ -507,6 +507,7 @@ body {
   overflow: hidden;
   box-shadow: 0 18px 36px rgba(15, 23, 42, 0.18);
   background: #000000;
+  position: relative;
 }
 
 .video-preview__player {
@@ -807,6 +808,13 @@ body {
   background: rgba(15, 23, 42, 0.04);
 }
 
+.preview-grid__video {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  display: block;
+  background: #000;
+}
+
 .preview-grid--qrcode .preview-grid__image {
   /* 二维码需要完整显示，不可裁剪 */
   height: auto;
@@ -996,6 +1004,93 @@ video {
   max-width: 100%;
   height: auto;
   display: block;
+}
+
+/* ================== 视频裁剪（框选区域） ================== */
+.video-cropper__container {
+  margin: 18px 0 8px;
+  padding: 18px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(245, 247, 255, 0.95));
+  border-radius: var(--radius-lg);
+  border: 1px solid rgba(61, 90, 254, 0.15);
+  box-shadow: 0 16px 40px rgba(61, 90, 254, 0.10);
+}
+
+.video-cropper__stage {
+  position: relative;
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: #000;
+}
+
+.video-cropper__video {
+  width: 100%;
+  display: block;
+  max-height: 520px;
+  background: #000;
+}
+
+.video-cropper__overlay {
+  position: absolute;
+  inset: 0;
+  cursor: crosshair;
+  background: rgba(0, 0, 0, 0.04);
+}
+
+.video-cropper__rect {
+  position: absolute;
+  display: none;
+  border: 2px solid rgba(34, 211, 238, 0.95);
+  background: rgba(34, 211, 238, 0.12);
+  box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.25);
+  border-radius: 10px;
+}
+
+.video-cropper__panel {
+  margin-top: 14px;
+  padding: 14px 16px;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(61, 90, 254, 0.16);
+  background: rgba(61, 90, 254, 0.05);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.video-cropper__panel-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.video-cropper__panel-row--meta {
+  justify-content: flex-start;
+}
+
+.video-cropper__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: var(--text-main);
+}
+
+.video-cropper__toggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+}
+
+.video-cropper__meta {
+  font-size: 0.92rem;
+  color: var(--text-sub);
+}
+
+.video-cropper__buttons {
+  display: inline-flex;
+  gap: 10px;
 }
 
 /* 显示控制工具类 */

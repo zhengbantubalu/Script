@@ -9,7 +9,8 @@ import { renderModule } from "../ui/modulePage.js";
 export const resolveRoute = () => {
   const hash = window.location.hash;
   if (hash.startsWith("#/module/")) {
-    const moduleId = hash.replace("#/module/", "");
+    const rawId = hash.replace("#/module/", "");
+    const moduleId = rawId.split("?")[0];
     const module = MODULES.find((item) => item.id === moduleId);
     // 如果模块有外部链接，直接跳转
     if (module?.externalUrl) {

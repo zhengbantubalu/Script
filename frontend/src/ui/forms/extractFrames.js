@@ -40,7 +40,7 @@ export const renderExtractFramesFields = (module) => {
         </div>
       </div>
       <div class="video-preview__player-wrapper" hidden data-video-player-wrapper>
-        <video class="video-preview__player" controls preload="metadata" data-video-player></video>
+        <video class="video-preview__player" controls preload="metadata" playsinline data-video-player></video>
       </div>
       <div class="video-preview__timeline" hidden data-video-timeline>
         <input
@@ -192,12 +192,34 @@ export const setupExtractFramesForm = (form) => {
   }
 
   let objectUrl = "";
+  /** @type {File|null} */
+  let lastSelectedFile = null;
 
   const revokeObjectUrl = () => {
     if (objectUrl) {
       URL.revokeObjectURL(objectUrl);
       objectUrl = "";
     }
+  };
+
+  /**
+   * 解析视频错误信息。
+   * @param {MediaError|null|undefined} err
+   * @returns {{code:number|null,message:string}}
+   */
+  const getVideoErrorInfo = (err) => {
+    const code = typeof err?.code === "number" ? err.code : null;
+    const message =
+      code === 1
+        ? "MEDIA_ERR_ABORTED"
+        : code === 2
+          ? "MEDIA_ERR_NETWORK"
+          : code === 3
+            ? "MEDIA_ERR_DECODE"
+            : code === 4
+              ? "MEDIA_ERR_SRC_NOT_SUPPORTED"
+              : "MEDIA_ERR_UNKNOWN";
+    return { code, message };
   };
 
   const togglePreview = (hasVideo) => {
@@ -272,26 +294,53 @@ export const setupExtractFramesForm = (form) => {
   };
 
   const handleFileChange = () => {
-    revokeObjectUrl();
-    const [file] = fileInput.files ?? [];
-    if (!file) {
-      togglePreview(false);
-      video.removeAttribute("src");
-      video.load();
+    try {
+      revokeObjectUrl();
+      const [file] = fileInput.files ?? [];
+      lastSelectedFile = file ?? null;
+      if (!file) {
+        togglePreview(false);
+        video.removeAttribute("src");
+        video.load();
+        resetSelections();
+        updateCurrentDisplay();
+        updateDurationDisplay();
+        syncSeekWithVideo();
+        return;
+      }
+
+      // 先显示播放器，再绑定 src（部分浏览器在元素不可见时不会触发 metadata 加载）
+      togglePreview(true);
+
+      try {
+        objectUrl = URL.createObjectURL(file);
+        video.src = objectUrl;
+        video.load();
+      } catch (err) {
+        // 兜底：某些环境可能禁止 blob URL，此时退化为 dataURL
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result;
+          if (typeof result === "string") {
+            video.src = result;
+            video.load();
+          }
+        };
+        reader.readAsDataURL(file);
+      }
+
       resetSelections();
       updateCurrentDisplay();
       updateDurationDisplay();
       syncSeekWithVideo();
-      return;
+    } catch (err) {
+      updateStatus(
+        form,
+        "error",
+        "视频预览初始化失败",
+        String(err && typeof err === "object" && "message" in err ? err.message : err)
+      );
     }
-    objectUrl = URL.createObjectURL(file);
-    video.src = objectUrl;
-    togglePreview(true);
-    video.load();
-    resetSelections();
-    updateCurrentDisplay();
-    updateDurationDisplay();
-    syncSeekWithVideo();
   };
 
   const handleSeekInput = () => {
@@ -370,13 +419,62 @@ export const setupExtractFramesForm = (form) => {
     fpsInput.value = String(value);
   };
 
-  fileInput.addEventListener("change", handleFileChange);
+  // 兼容：部分 WebView/移动端对 file input 只触发 input 不触发 change
+  let fileChangeScheduled = false;
+  const scheduleFileChange = () => {
+    if (fileChangeScheduled) return;
+    fileChangeScheduled = true;
+    queueMicrotask(() => {
+      fileChangeScheduled = false;
+      handleFileChange();
+    });
+  };
+  fileInput.addEventListener("change", scheduleFileChange);
+  fileInput.addEventListener("input", scheduleFileChange);
+
+  /**
+   * 兜底：某些 WebView 既不触发 change 也不触发 input。
+   * 这里用轮询检测文件签名变化（文件名/大小/最后修改时间），仅在变化时触发一次更新。
+   * @returns {void}
+   */
+  const installFileInputWatcher = () => {
+    /**
+     * @returns {string}
+     */
+    const getFileSignature = () => {
+      const f = fileInput.files && fileInput.files.length > 0 ? fileInput.files[0] : null;
+      if (!f) return "";
+      return `${f.name}|${f.size}|${f.lastModified}`;
+    };
+    let lastSig = getFileSignature();
+    window.setInterval(() => {
+      const nextSig = getFileSignature();
+      if (nextSig !== lastSig) {
+        lastSig = nextSig;
+        scheduleFileChange();
+      }
+    }, 300);
+  };
+  installFileInputWatcher();
   seek.addEventListener("input", handleSeekInput);
   video.addEventListener("timeupdate", () => {
     if (!seek.matches(":active")) {
       seek.value = String(video.currentTime);
     }
     updateCurrentDisplay();
+  });
+  video.addEventListener("error", () => {
+    const err = video.error;
+    const info = getVideoErrorInfo(err);
+    if (statusPanel) {
+      const fileType = lastSelectedFile?.type || "未知格式";
+      const fileName = lastSelectedFile?.name || "视频文件";
+      const detail =
+        info.code === 4
+          ? `${fileName}（${fileType}）当前浏览器无法解码。请转码为 H.264/AAC 的 MP4 或 WebM 后重试。`
+          : `${fileName} 无法播放，请检查文件是否损坏或格式受支持。`;
+      updateStatus(form, "error", "视频预览失败", detail);
+    }
   });
   video.addEventListener("loadedmetadata", () => {
     updateDurationDisplay();
@@ -457,6 +555,24 @@ export const setupExtractFramesForm = (form) => {
       const formData = new FormData();
       formData.append("video", file);
       formData.append("timestamp", String(currentTime.toFixed(2)));
+      // 可选：带上裁剪参数（若用户启用并框选了区域）
+      const cropX = form.querySelector('input[type="hidden"][name="crop_x"]');
+      const cropY = form.querySelector('input[type="hidden"][name="crop_y"]');
+      const cropW = form.querySelector('input[type="hidden"][name="crop_w"]');
+      const cropH = form.querySelector('input[type="hidden"][name="crop_h"]');
+      if (
+        cropX instanceof HTMLInputElement &&
+        cropY instanceof HTMLInputElement &&
+        cropW instanceof HTMLInputElement &&
+        cropH instanceof HTMLInputElement
+      ) {
+        if (cropX.value && cropY.value && cropW.value && cropH.value) {
+          formData.append("crop_x", cropX.value);
+          formData.append("crop_y", cropY.value);
+          formData.append("crop_w", cropW.value);
+          formData.append("crop_h", cropH.value);
+        }
+      }
 
       const endpoint = resolveEndpointUrl("/api/tasks/extract-single-frame");
       const response = await fetch(endpoint, {

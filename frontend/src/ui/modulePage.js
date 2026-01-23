@@ -3,6 +3,7 @@ import { BACKEND_BASE_URL } from "../core/config.js";
 import { render } from "../app/render.js";
 import { renderExtractFramesFields, setupExtractFramesForm } from "./forms/extractFrames.js";
 import { renderQrcodeFields, setupQrcodeForm } from "./forms/qrcode.js";
+import { setupVideoCropperForForm } from "./forms/videoCropper.js";
 
 /**
  * 生成面包屑导航。
@@ -151,5 +152,9 @@ export const renderModule = (moduleId) => {
     const formEl = document.querySelector(`[data-module-form="${target.id}"]`);
     setupQrcodeForm(formEl);
   }
+
+  // 通用能力：为所有含视频上传的表单挂载“框选裁剪”组件（若无视频输入则自动 no-op）
+  const formEl = document.querySelector(`[data-module-form="${target.id}"]`);
+  setupVideoCropperForForm(formEl);
 };
 

@@ -2,6 +2,27 @@ import { BACKEND_BASE_URL } from "../core/config.js";
 import { buildDownloadUrl, buildGifViewUrl, resolveFileUrl } from "../core/url.js";
 
 /**
+ * 判断文件路径是否为视频格式。
+ * @param {string} path
+ * @returns {boolean}
+ */
+const isVideoFile = (path) => {
+  if (typeof path !== "string" || path.trim() === "") {
+    return false;
+  }
+  const safePath = path.split("?")[0].split("#")[0].toLowerCase();
+  return [
+    ".mp4",
+    ".mov",
+    ".m4v",
+    ".webm",
+    ".mkv",
+    ".avi",
+    ".flv"
+  ].some((ext) => safePath.endsWith(ext));
+};
+
+/**
  * 更新状态提示。
  * @param {HTMLFormElement} form 表单元素
  * @param {"info"|"success"|"error"} type 状态类型
@@ -192,52 +213,83 @@ export const renderResult = (form, module, payload) => {
       const header = `<p class="result__meta">扫描网段：${networks.join(", ") || "未识别"}</p>`;
       previewsEl.innerHTML = `${header}${groupsHtml}`;
       previewsEl.hidden = false;
-    } else if (Array.isArray(payload.previews) && payload.previews.length > 0) {
-      const isFullPreviewModule = module.id === "images-download";
-      const isQrModule =
-        module.id === "qrcode-generator" ||
-        module.id === "url-to-qrcode" ||
-        module.id === "mp3-to-qrcode";
-      const previewItems = payload.previews
-        .map((previewUrl, index) => {
-          if (typeof previewUrl !== "string") {
-            return "";
-          }
-          const fullUrl = resolveFileUrl(previewUrl);
-          const downloadUrl = buildDownloadUrl(previewUrl);
-          const filename = previewUrl.split("/").pop() || `file-${index + 1}`;
-          const copyBtn =
-            module.id === "mp4-to-gif"
-              ? `<button class="preview-grid__copy" type="button" data-copy-gif data-src="${fullUrl}">复制</button>`
-              : "";
-          return `
-            <figure class="preview-grid__item">
-              <button
-                class="preview-grid__image-button"
-                type="button"
-                data-preview-full="${fullUrl}"
-                data-preview-alt="${module.name} 预览图 ${index + 1}"
-              >
-                <img class="preview-grid__image" src="${fullUrl}" alt="${module.name} 预览图 ${index + 1}" loading="lazy" />
-              </button>
-              <figcaption class="preview-grid__caption">
-                <span class="preview-grid__label">预览 ${index + 1}</span>
-                <a class="preview-grid__download" href="${downloadUrl}" download="${filename}">下载</a>
-                ${copyBtn}
-              </figcaption>
-            </figure>
-          `;
-        })
-        .join("");
-      const header = `<p class="result__meta">结果预览（${isFullPreviewModule ? "共" : "展示前"} ${
-        payload.previews.length
-      } 项）</p>`;
-      const gridClass = `preview-grid${isQrModule ? " preview-grid--qrcode" : ""}`;
-      previewsEl.innerHTML = `${header}<div class="${gridClass}">${previewItems}</div>`;
-      previewsEl.hidden = false;
     } else {
-      previewsEl.hidden = true;
-      previewsEl.innerHTML = "";
+      const blocks = [];
+      if (Array.isArray(payload.previews) && payload.previews.length > 0) {
+        const isFullPreviewModule = module.id === "images-download";
+        const isQrModule =
+          module.id === "qrcode-generator" ||
+          module.id === "url-to-qrcode" ||
+          module.id === "mp3-to-qrcode";
+        const previewItems = payload.previews
+          .map((previewUrl, index) => {
+            if (typeof previewUrl !== "string") {
+              return "";
+            }
+            const fullUrl = resolveFileUrl(previewUrl);
+            const downloadUrl = buildDownloadUrl(previewUrl);
+            const filename = previewUrl.split("/").pop() || `file-${index + 1}`;
+            const copyBtn =
+              module.id === "mp4-to-gif"
+                ? `<button class="preview-grid__copy" type="button" data-copy-gif data-src="${fullUrl}">复制</button>`
+                : "";
+            return `
+              <figure class="preview-grid__item">
+                <button
+                  class="preview-grid__image-button"
+                  type="button"
+                  data-preview-full="${fullUrl}"
+                  data-preview-alt="${module.name} 预览图 ${index + 1}"
+                >
+                  <img class="preview-grid__image" src="${fullUrl}" alt="${module.name} 预览图 ${index + 1}" loading="lazy" />
+                </button>
+                <figcaption class="preview-grid__caption">
+                  <span class="preview-grid__label">预览 ${index + 1}</span>
+                  <a class="preview-grid__download" href="${downloadUrl}" download="${filename}">下载</a>
+                  ${copyBtn}
+                </figcaption>
+              </figure>
+            `;
+          })
+          .join("");
+        const header = `<p class="result__meta">结果预览（${isFullPreviewModule ? "共" : "展示前"} ${
+          payload.previews.length
+        } 项）</p>`;
+        const gridClass = `preview-grid${isQrModule ? " preview-grid--qrcode" : ""}`;
+        blocks.push(`${header}<div class="${gridClass}">${previewItems}</div>`);
+      }
+
+      const videoFiles = Array.isArray(payload.files)
+        ? payload.files.filter((fileUrl) => typeof fileUrl === "string" && isVideoFile(fileUrl))
+        : [];
+      if (videoFiles.length > 0) {
+        const videoItems = videoFiles
+          .map((videoUrl, index) => {
+            const fullUrl = resolveFileUrl(videoUrl);
+            const downloadUrl = buildDownloadUrl(videoUrl);
+            const filename = videoUrl.split("/").pop() || `video-${index + 1}`;
+            return `
+              <figure class="preview-grid__item">
+                <video class="preview-grid__video" src="${fullUrl}" controls preload="metadata" playsinline></video>
+                <figcaption class="preview-grid__caption">
+                  <span class="preview-grid__label">视频预览 ${index + 1}</span>
+                  <a class="preview-grid__download" href="${downloadUrl}" download="${filename}">下载</a>
+                </figcaption>
+              </figure>
+            `;
+          })
+          .join("");
+        const header = `<p class="result__meta">视频预览（共 ${videoFiles.length} 项）</p>`;
+        blocks.push(`${header}<div class="preview-grid preview-grid--video">${videoItems}</div>`);
+      }
+
+      if (blocks.length > 0) {
+        previewsEl.innerHTML = blocks.join("");
+        previewsEl.hidden = false;
+      } else {
+        previewsEl.hidden = true;
+        previewsEl.innerHTML = "";
+      }
     }
   }
 
