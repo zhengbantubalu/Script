@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
 import os
 import sys
 from pathlib import Path
 from typing import List, Optional
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, Request
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import (
     JSONResponse,
@@ -29,7 +30,7 @@ from .utils import (
     save_upload_file,
     maybe_prepare_cropped_video,
 )
-from .job_meta import load_job_meta, save_job_meta
+from .job_meta import load_job_meta, save_job_meta, update_job_progress
 
 # 将项目根目录加入路径，方便导入现有脚本
 if str(BASE_DIR) not in sys.path:
@@ -235,8 +236,143 @@ def api_utils_qrcode(url: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+def _extract_frames_with_progress(
+    job_id: str,
+    video_path: Path,
+    start_sec: float,
+    end_sec: float,
+    n_fps: int,
+    output_path: Path,
+    output_dir_name: str,
+    input_filename: str,
+):
+    """
+    后台任务：执行视频抽帧并更新进度。
+    """
+    import cv2
+
+    try:
+        # 初始化 meta.json（状态：running）
+        update_job_progress("extract-frames", job_id, 0.0, "正在解析视频...", status="running")
+
+        # 打开视频文件
+        cap = cv2.VideoCapture(str(video_path))
+        if not cap.isOpened():
+            raise IOError("无法打开视频文件")
+
+        # 获取视频属性
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        duration = total_frames / fps if fps > 0 else 0
+        if end_sec == -1:
+            end_sec = duration
+
+        # 验证时间范围有效性
+        if start_sec < 0 or end_sec > duration or start_sec >= end_sec:
+            cap.release()
+            raise ValueError(f"无效时间范围 (视频时长: {duration:.2f}秒)")
+
+        # 将秒转换为帧号
+        start_frame = int(start_sec * fps)
+        end_frame = min(int(end_sec * fps), total_frames - 1)
+
+        # 计算帧间隔
+        interval = max(1, int(round(fps / n_fps)))  # 至少间隔1帧
+
+        # 估算需要处理的帧数（用于进度计算）
+        frames_to_process = end_frame - start_frame + 1
+        estimated_saved = max(1, frames_to_process // interval)
+
+        update_job_progress(
+            "extract-frames",
+            job_id,
+            5.0,
+            f"开始抽帧：预计生成约 {estimated_saved} 张图片",
+            status="running",
+        )
+
+        # 定位到起始帧
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        count = 0
+        saved_count = 0
+        current_frame = start_frame
+        last_progress_update = 0
+
+        while current_frame <= end_frame:
+            ret, frame = cap.read()
+            if not ret:
+                break
+
+            # 检查是否达到保存间隔
+            if count % interval == 0:
+                # 计算当前时间戳
+                timestamp = current_frame / fps
+                frame_path = output_path / f"{input_filename}_frame_{timestamp:.2f}s.jpg"
+                cv2.imwrite(str(frame_path), frame)
+                saved_count += 1
+
+                # 每保存 10 张图片或每 5% 进度更新一次
+                progress = 5.0 + ((current_frame - start_frame) / frames_to_process) * 85.0
+                if saved_count - last_progress_update >= 10 or progress - last_progress_update >= 5.0:
+                    update_job_progress(
+                        "extract-frames",
+                        job_id,
+                        progress,
+                        f"已抽取 {saved_count} 张图片...",
+                        status="running",
+                    )
+                    last_progress_update = progress
+
+            count += 1
+            current_frame += 1
+
+        cap.release()
+
+        if saved_count == 0:
+            raise ValueError("未生成任何图像文件")
+
+        # 打包阶段（90-95%）
+        update_job_progress("extract-frames", job_id, 90.0, "正在打包结果文件...", status="running")
+        zip_path = output_path.parent / f"{output_dir_name}.zip"
+        make_zip(output_path, zip_path)
+
+        # 生成文件列表（95-100%）
+        update_job_progress("extract-frames", job_id, 95.0, "正在生成文件列表...", status="running")
+        files = sorted(iter_files(output_path))
+        files_urls = [build_file_url(file_path) for file_path in files]
+        preview_limit = 8
+        previews = files_urls[:preview_limit]
+
+        result = {
+            "message": f"抽帧完成，共生成 {saved_count} 张图片",
+            "job_id": job_id,
+            "input_filename": input_filename,
+            "archive": build_file_url(zip_path),
+            "files": files_urls,
+            "total_files": len(files_urls),
+            "previews": previews,
+        }
+
+        # 最终保存（100%，状态：success）
+        save_job_meta("extract-frames", job_id, result, status="success")
+        update_job_progress("extract-frames", job_id, 100.0, "处理完成", status="success")
+
+    except Exception as exc:  # noqa: BLE001
+        # 保存错误信息
+        error_result = {
+            "job_id": job_id,
+            "input_filename": input_filename,
+            "message": f"处理失败：{str(exc)}",
+            "status": "failed",
+        }
+        save_job_meta("extract-frames", job_id, error_result, status="failed")
+        update_job_progress("extract-frames", job_id, 0.0, f"处理失败：{str(exc)}", status="failed")
+
+
 @app.post("/api/tasks/extract-frames")
 async def api_extract_frames(
+    background_tasks: BackgroundTasks,
     video: UploadFile = File(...),
     start_sec: Optional[float] = Form(None),
     end_sec: Optional[float] = Form(None),
@@ -247,6 +383,11 @@ async def api_extract_frames(
     crop_w: Optional[int] = Form(None),
     crop_h: Optional[int] = Form(None),
 ):
+    """
+    视频抽帧接口（异步模式）。
+    上传完成后立即返回 job_id，后台异步执行抽帧任务。
+    前端可通过 /api/jobs/extract-frames/{job_id} 轮询获取进度。
+    """
     job_id, job_dir = create_job_dir("extract-frames")
     input_filename = (video.filename or "").strip() or "video"
     video_path = job_dir / input_filename
@@ -255,43 +396,39 @@ async def api_extract_frames(
 
     output_dir_name = output_dir.strip() or "frames"
     output_path = job_dir / output_dir_name
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    try:
-        saved = extract_frames(
-            video_path=str(video_path),
-            start_sec=float(start_sec) if start_sec is not None else 0.0,
-            end_sec=float(end_sec) if end_sec is not None else -1,
-            n_fps=int(n_fps),
-            output_dir=str(output_path),
-        )
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    files = sorted(iter_files(output_path))
-    if not files:
-        raise HTTPException(status_code=500, detail="未生成任何图像文件")
-
-    zip_path = job_dir / f"{output_dir_name}.zip"
-    make_zip(output_path, zip_path)
-
-    files_urls = [build_file_url(file_path) for file_path in files]
-    preview_limit = 8
-    previews = files_urls[:preview_limit]
-
-    result = {
-        "message": f"抽帧完成，共生成 {saved} 张图片",
+    # 初始化 meta.json（状态：pending）
+    initial_meta = {
         "job_id": job_id,
         "input_filename": input_filename,
-        "archive": build_file_url(zip_path),
-        "files": files_urls,
-        "total_files": len(files_urls),
-        "previews": previews,
+        "message": "任务已创建，等待处理",
+        "status": "pending",
+        "progress": 0.0,
+        "progress_message": "任务已创建",
     }
+    save_job_meta("extract-frames", job_id, initial_meta, status="pending")
 
-    # 持久化任务元数据，便于后续查询与恢复
-    save_job_meta("extract-frames", job_id, result, status="success")
+    # 启动后台任务
+    background_tasks.add_task(
+        _extract_frames_with_progress,
+        job_id=job_id,
+        video_path=video_path,
+        start_sec=float(start_sec) if start_sec is not None else 0.0,
+        end_sec=float(end_sec) if end_sec is not None else -1,
+        n_fps=int(n_fps),
+        output_path=output_path,
+        output_dir_name=output_dir_name,
+        input_filename=input_filename,
+    )
 
-    return result
+    # 立即返回 job_id，前端开始轮询
+    return {
+        "job_id": job_id,
+        "message": "任务已创建，正在后台处理",
+        "status": "pending",
+        "input_filename": input_filename,
+    }
 
 
 @app.post("/api/tasks/extract-single-frame")

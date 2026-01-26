@@ -38,6 +38,52 @@ def save_job_meta(
     return meta_path
 
 
+def update_job_progress(
+    module_id: str,
+    job_id: str,
+    progress: float,
+    message: str | None = None,
+    status: str | None = None,
+) -> Path:
+    """
+    更新任务进度（原子写入，避免并发冲突）。
+    
+    Args:
+        module_id: 模块 ID
+        job_id: 任务 ID
+        progress: 进度百分比 (0.0-100.0)
+        message: 可选的状态消息
+        status: 可选的状态（pending/running/success/failed）
+    """
+    job_dir = STORAGE_DIR / module_id / job_id
+    meta_path = job_dir / "meta.json"
+    
+    # 读取现有数据（如果存在）
+    data = {}
+    if meta_path.exists():
+        with meta_path.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    
+    # 更新进度和状态
+    data["progress"] = max(0.0, min(100.0, float(progress)))
+    if message is not None:
+        data["progress_message"] = str(message)
+    if status is not None:
+        data["status"] = str(status)
+    
+    # 确保必要字段存在
+    data.setdefault("job_id", job_id)
+    data.setdefault("module_id", module_id)
+    if "created_at" not in data:
+        data["created_at"] = datetime.now(timezone.utc).isoformat()
+    
+    # 原子写入
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    
+    return meta_path
+
+
 def load_job_meta(module_id: str, job_id: str) -> dict:
     """读取指定任务的 meta.json。"""
 

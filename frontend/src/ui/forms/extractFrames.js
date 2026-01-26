@@ -4,6 +4,7 @@ import { renderResult, updateStatus, resetResult } from "../result.js";
 import { MODULES } from "../../data/modules.js";
 import { addHistoryEntry } from "../../core/history.js";
 import { serializeForm } from "../../api/submit.js";
+import { BACKEND_BASE_URL } from "../../core/config.js";
 
 /**
  * 渲染抽帧模块专用表单内容。
@@ -770,37 +771,32 @@ export const handleExtractFramesSubmit = async (event) => {
       xhr.send(formData);
     });
 
-    // 上传完成，切换到处理中状态
-    updateStatus(form, "info", "后端正在处理...", "视频已上传，正在解析并抽取帧");
-
-    const successMessage =
-      typeof result.message === "string" && result.message.trim() !== ""
-        ? result.message.trim()
-        : `${module.name}任务已提交`;
-    const metaText = result.job_id ? `任务编号：${result.job_id}` : "任务已排队";
-
-    // 记录任务历史，本模块独有
-    if (typeof result.job_id === "string" && result.job_id.trim() !== "") {
-      let filename = "";
-      if (typeof result.input_filename === "string" && result.input_filename.trim() !== "") {
-        filename = result.input_filename.trim();
-      } else {
-        if (fileInput instanceof HTMLInputElement && fileInput.files && fileInput.files[0]) {
-          filename = fileInput.files[0].name;
-        }
-      }
-      addHistoryEntry({
-        jobId: result.job_id.trim(),
-        moduleId: module.id,
-        moduleName: module.name,
-        createdAt: new Date().toISOString(),
-        message: successMessage,
-        filename
-      });
+    // 上传完成，获取 job_id 并开始轮询进度
+    const jobId = result.job_id;
+    if (!jobId || typeof jobId !== "string" || jobId.trim() === "") {
+      throw new Error("服务器未返回任务编号");
     }
 
-    updateStatus(form, "success", successMessage, metaText);
-    renderResult(form, module, result);
+    // 立即记录任务历史（pending 状态）
+    let filename = "";
+    if (typeof result.input_filename === "string" && result.input_filename.trim() !== "") {
+      filename = result.input_filename.trim();
+    } else {
+      if (fileInput instanceof HTMLInputElement && fileInput.files && fileInput.files[0]) {
+        filename = fileInput.files[0].name;
+      }
+    }
+    addHistoryEntry({
+      jobId: jobId.trim(),
+      moduleId: module.id,
+      moduleName: module.name,
+      createdAt: new Date().toISOString(),
+      message: "任务处理中...",
+      filename
+    });
+
+    // 开始轮询进度
+    await pollJobProgress(form, module, jobId.trim(), filename);
   } catch (error) {
     const errorMessage =
       error instanceof TypeError
@@ -810,5 +806,108 @@ export const handleExtractFramesSubmit = async (event) => {
           : "未知错误";
     updateStatus(form, "error", "提交失败", errorMessage);
   }
+};
+
+/**
+ * 轮询任务进度，每1秒请求一次，直到任务完成或失败。
+ * @param {HTMLFormElement} form
+ * @param {{id:string,name:string}} module
+ * @param {string} jobId
+ * @param {string} filename
+ * @returns {Promise<void>}
+ */
+const pollJobProgress = async (form, module, jobId, filename) => {
+  const pollInterval = 1000; // 1秒
+  const maxPollTime = 30 * 60 * 1000; // 最多轮询30分钟
+  const startTime = Date.now();
+  let pollCount = 0;
+
+  const poll = async () => {
+    // 检查是否超时
+    if (Date.now() - startTime > maxPollTime) {
+      updateStatus(form, "error", "任务处理超时", "请稍后通过历史任务查看结果");
+      return;
+    }
+
+    try {
+      const url = new URL(`/api/jobs/${module.id}/${jobId}`, BACKEND_BASE_URL).toString();
+      const response = await fetch(url);
+
+      if (!response.ok) {
+        // 如果任务不存在或已过期，停止轮询
+        if (response.status === 404) {
+          updateStatus(form, "error", "任务不存在或已过期", `任务编号：${jobId}`);
+          return;
+        }
+        // 其他错误，继续轮询
+        setTimeout(poll, pollInterval);
+        return;
+      }
+
+      const data = await response.json();
+      const status = data.status || "pending";
+      const progress = typeof data.progress === "number" ? data.progress : 0;
+      const progressMessage =
+        typeof data.progress_message === "string" && data.progress_message.trim() !== ""
+          ? data.progress_message.trim()
+          : "处理中...";
+
+      pollCount++;
+
+      // 根据状态处理
+      if (status === "success") {
+        // 任务完成
+        const successMessage =
+          typeof data.message === "string" && data.message.trim() !== ""
+            ? data.message.trim()
+            : `${module.name}任务已完成`;
+        const metaText = `任务编号：${jobId}`;
+
+        // 更新历史记录
+        addHistoryEntry({
+          jobId,
+          moduleId: module.id,
+          moduleName: module.name,
+          createdAt: data.created_at || new Date().toISOString(),
+          message: successMessage,
+          filename
+        });
+
+        updateStatus(form, "success", successMessage, metaText);
+        renderResult(form, module, data);
+        return; // 停止轮询
+      } else if (status === "failed") {
+        // 任务失败
+        const errorMessage =
+          typeof data.message === "string" && data.message.trim() !== ""
+            ? data.message.trim()
+            : "任务处理失败";
+        updateStatus(form, "error", "处理失败", errorMessage);
+        return; // 停止轮询
+      } else {
+        // 仍在处理中（pending/running），更新进度显示
+        const progressText =
+          progress > 0
+            ? `${progress.toFixed(1)}% - ${progressMessage}`
+            : progressMessage;
+        updateStatus(form, "info", "后端正在处理...", progressText);
+
+        // 继续轮询
+        setTimeout(poll, pollInterval);
+      }
+    } catch (error) {
+      // 网络错误，继续轮询（可能是临时网络问题）
+      if (pollCount < 3) {
+        // 前3次失败立即重试
+        setTimeout(poll, pollInterval);
+      } else {
+        // 多次失败后，延长间隔
+        setTimeout(poll, pollInterval * 2);
+      }
+    }
+  };
+
+  // 开始第一次轮询（延迟一小段时间，确保后端已创建任务）
+  setTimeout(poll, 500);
 };
 
