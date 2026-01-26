@@ -1,7 +1,6 @@
 import { MODULES } from "../data/modules.js";
 import { resolveEndpointUrl } from "../core/url.js";
 import { renderResult, resetResult, updateStatus } from "../ui/result.js";
-import { addHistoryEntry } from "../core/history.js";
 
 /**
  * 序列化表单数据。
@@ -104,28 +103,6 @@ export const handleSubmit = async (event) => {
         ? result.message.trim()
         : `${module.name}任务已提交`;
     const metaText = result.job_id ? `任务编号：${result.job_id}` : "任务已排队";
-
-    // 仅为视频抽帧模块记录任务历史（MVP 阶段）
-    if (module.id === "extract-frames" && typeof result.job_id === "string" && result.job_id.trim() !== "") {
-      let filename = "";
-      if (typeof result.input_filename === "string" && result.input_filename.trim() !== "") {
-        filename = result.input_filename.trim();
-      } else {
-        const fileInput = form.querySelector('input[name="video"]');
-        if (fileInput instanceof HTMLInputElement && fileInput.files && fileInput.files[0]) {
-          filename = fileInput.files[0].name;
-        }
-      }
-      addHistoryEntry({
-        jobId: result.job_id.trim(),
-        moduleId: module.id,
-        moduleName: module.name,
-        createdAt: new Date().toISOString(),
-        message: successMessage,
-        filename
-      });
-    }
-
     updateStatus(form, "success", successMessage, metaText);
     renderResult(form, module, result);
   } catch (error) {

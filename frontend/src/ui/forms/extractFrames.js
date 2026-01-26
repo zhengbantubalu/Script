@@ -1,6 +1,9 @@
 import { formatSeconds } from "../../core/format.js";
 import { resolveEndpointUrl } from "../../core/url.js";
-import { renderResult, updateStatus } from "../result.js";
+import { renderResult, updateStatus, resetResult } from "../result.js";
+import { MODULES } from "../../data/modules.js";
+import { addHistoryEntry } from "../../core/history.js";
+import { serializeForm } from "../../api/submit.js";
 
 /**
  * 渲染抽帧模块专用表单内容。
@@ -640,6 +643,172 @@ export const setupExtractFramesForm = (form) => {
     saveFrameButton.addEventListener("click", () => {
       void saveCurrentFrame();
     });
+  }
+};
+
+/**
+ * 格式化文件大小（字节）为可读字符串。
+ * @param {number} bytes
+ * @returns {string}
+ */
+const formatFileSize = (bytes) => {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return "未知大小";
+  }
+  if (bytes === 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  const unitIndex = Math.floor(Math.log10(bytes) / 3);
+  const unit = units[Math.min(unitIndex, units.length - 1)];
+  const value = bytes / Math.pow(1000, Math.min(unitIndex, units.length - 1));
+  return `${value.toFixed(unitIndex === 0 ? 0 : 1)} ${unit}`;
+};
+
+/**
+ * 处理视频抽帧模块的表单提交（独立逻辑，从统一提交逻辑中复制而来）。
+ * MVP 阶段独有，支持上传进度显示、任务历史记录。
+ * @param {SubmitEvent} event
+ * @returns {Promise<void>}
+ */
+export const handleExtractFramesSubmit = async (event) => {
+  event.preventDefault();
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement)) {
+    return;
+  }
+  const moduleId = form.getAttribute("data-module-form");
+  const module = MODULES.find((item) => item.id === moduleId);
+  if (!module || module.id !== "extract-frames") {
+    return;
+  }
+
+  resetResult(form);
+  updateStatus(form, "info", "准备上传视频...", "请稍候");
+
+  try {
+    const formData = serializeForm(form);
+    const endpoint = resolveEndpointUrl(module.endpoint);
+
+    // 获取视频文件大小（用于进度显示）
+    const fileInput = form.querySelector('input[name="video"]');
+    let totalSize = 0;
+    if (fileInput instanceof HTMLInputElement && fileInput.files && fileInput.files[0]) {
+      totalSize = fileInput.files[0].size;
+    }
+
+    // 使用 XMLHttpRequest 以支持上传进度监听
+    const result = await new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+
+      // 监听上传进度
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && totalSize > 0) {
+          const percent = ((e.loaded / e.total) * 100).toFixed(1);
+          const loaded = formatFileSize(e.loaded);
+          const total = formatFileSize(e.total);
+          updateStatus(
+            form,
+            "info",
+            "正在上传视频...",
+            `已上传 ${percent}%（${loaded} / ${total}）`
+          );
+        } else if (e.lengthComputable) {
+          const percent = ((e.loaded / e.total) * 100).toFixed(1);
+          const loaded = formatFileSize(e.loaded);
+          updateStatus(form, "info", "正在上传视频...", `已上传 ${percent}%（${loaded}）`);
+        }
+      });
+
+      // 监听请求完成
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const responseText = xhr.responseText;
+            const data = responseText ? JSON.parse(responseText) : { message: "提交成功" };
+            resolve(data);
+          } catch (parseError) {
+            reject(new Error("无法解析服务器响应"));
+          }
+        } else {
+          let detail = `请求失败，状态码 ${xhr.status}`;
+          try {
+            const contentType = xhr.getResponseHeader("content-type") || "";
+            if (contentType.includes("application/json")) {
+              const data = JSON.parse(xhr.responseText);
+              if (data && typeof data.detail === "string" && data.detail.trim() !== "") {
+                detail = data.detail.trim();
+              } else if (typeof data.message === "string" && data.message.trim() !== "") {
+                detail = data.message.trim();
+              }
+            } else {
+              const text = xhr.responseText;
+              if (text && text.trim() !== "") detail = text.trim();
+            }
+          } catch (_e) {
+            // ignore
+          }
+          reject(new Error(detail));
+        }
+      });
+
+      // 监听错误
+      xhr.addEventListener("error", () => {
+        reject(new Error("网络错误，无法连接到服务器"));
+      });
+
+      // 监听超时（可选，设置超时时间）
+      xhr.addEventListener("timeout", () => {
+        reject(new Error("请求超时，请检查网络连接"));
+      });
+
+      // 设置超时时间（30分钟，适合大文件上传）
+      xhr.timeout = 30 * 60 * 1000;
+
+      // 发送请求
+      xhr.open("POST", endpoint);
+      xhr.send(formData);
+    });
+
+    // 上传完成，切换到处理中状态
+    updateStatus(form, "info", "后端正在处理...", "视频已上传，正在解析并抽取帧");
+
+    const successMessage =
+      typeof result.message === "string" && result.message.trim() !== ""
+        ? result.message.trim()
+        : `${module.name}任务已提交`;
+    const metaText = result.job_id ? `任务编号：${result.job_id}` : "任务已排队";
+
+    // 记录任务历史，本模块独有
+    if (typeof result.job_id === "string" && result.job_id.trim() !== "") {
+      let filename = "";
+      if (typeof result.input_filename === "string" && result.input_filename.trim() !== "") {
+        filename = result.input_filename.trim();
+      } else {
+        if (fileInput instanceof HTMLInputElement && fileInput.files && fileInput.files[0]) {
+          filename = fileInput.files[0].name;
+        }
+      }
+      addHistoryEntry({
+        jobId: result.job_id.trim(),
+        moduleId: module.id,
+        moduleName: module.name,
+        createdAt: new Date().toISOString(),
+        message: successMessage,
+        filename
+      });
+    }
+
+    updateStatus(form, "success", successMessage, metaText);
+    renderResult(form, module, result);
+  } catch (error) {
+    const errorMessage =
+      error instanceof TypeError
+        ? `无法连接后端服务：${error.message}`
+        : error instanceof Error
+          ? error.message
+          : "未知错误";
+    updateStatus(form, "error", "提交失败", errorMessage);
   }
 };
 

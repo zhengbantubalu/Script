@@ -2,6 +2,7 @@ import { getLocalScannerBaseUrl } from "../core/config.js";
 import { downloadTextFile } from "../core/download.js";
 import { buildLocalScannerCommand, buildLocalScannerScript } from "../core/localScanner.js";
 import { handleSubmit } from "../api/submit.js";
+import { handleExtractFramesSubmit } from "../ui/forms/extractFrames.js";
 import { showImagePreview } from "../ui/imagePreview.js";
 import { updateStatus } from "../ui/result.js";
 
@@ -142,7 +143,16 @@ export const bindEvents = () => {
 
   document.body.addEventListener("submit", (event) => {
     if (event.target instanceof HTMLFormElement) {
-      void handleSubmit(event);
+      const form = event.target;
+      const moduleId = form.getAttribute("data-module-form");
+      // 视频抽帧模块使用独立的提交逻辑
+      // 为了先实现 MVP 阶段的功能，先使用独立的提交逻辑
+      if (moduleId === "extract-frames") {
+        void handleExtractFramesSubmit(event);
+      } else {
+        // 其他模块使用统一的提交逻辑
+        void handleSubmit(event);
+      }
     }
   });
 };
